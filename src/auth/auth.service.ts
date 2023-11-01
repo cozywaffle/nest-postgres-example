@@ -1,56 +1,72 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { Prisma, User } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import * as argon from 'argon2';
+import { AuthDto, RegDto } from './dto/auth.dto';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 @Injectable()
 export class AuthService {
   constructor(private prisma: PrismaService) {}
 
-  async user(
-    userWhereUniqueInput: Prisma.UserWhereUniqueInput,
-  ): Promise<User | null> {
-    return this.prisma.user.findUnique({
-      where: userWhereUniqueInput,
-    });
+  async createUser(dto: RegDto): Promise<User> {
+    try {
+      const hash = await argon.hash(dto.password);
+
+      const user = await this.prisma.user.create({
+        data: {
+          login: dto.login,
+          username: dto.username,
+          hash,
+        },
+      });
+
+      delete user.hash;
+
+      return user as User;
+    } catch (error) {
+      if (
+        error instanceof
+        PrismaClientKnownRequestError
+      ) {
+        if (error.code === 'P2002') {
+          throw new ForbiddenException(
+            'Credentials are taken',
+          );
+        }
+      }
+      throw error;
+    }
   }
 
-  async users(params: {
-    skip?: number;
-    take?: number;
-    cursor?: Prisma.UserWhereUniqueInput;
-    where?: Prisma.UserWhereInput;
-    orderBy?: Prisma.UserOrderByWithRelationInput;
-  }): Promise<User[]> {
-    const { skip, take, cursor, where, orderBy } = params;
-    return this.prisma.user.findMany({
-      skip,
-      take,
-      cursor,
-      where,
-      orderBy,
-    });
-  }
+  async signIn(dto: AuthDto): Promise<User> {
+    const user =
+      await this.prisma.user.findUnique({
+        where: {
+          login: dto.login,
+        },
+      });
 
-  async createUser(data: Prisma.UserCreateInput): Promise<User> {
-    return this.prisma.user.create({
-      data,
-    });
-  }
+    if (!user)
+      throw new ForbiddenException(
+        'Credentials incorrect',
+      );
 
-  async updateUser(params: {
-    where: Prisma.UserWhereUniqueInput;
-    data: Prisma.UserUpdateInput;
-  }): Promise<User> {
-    const { where, data } = params;
-    return this.prisma.user.update({
-      data,
-      where,
-    });
-  }
+    const pwMatches = await argon.verify(
+      user.hash,
+      dto.password,
+    );
 
-  async deleteUser(where: Prisma.UserWhereUniqueInput): Promise<User> {
-    return this.prisma.user.delete({
-      where,
-    });
+    if (!pwMatches)
+      throw new ForbiddenException(
+        'Credentials incorrect',
+      );
+
+    delete user.hash;
+
+    return user as User;
   }
 }
