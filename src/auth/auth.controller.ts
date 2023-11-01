@@ -11,8 +11,8 @@ export class AuthController {
     return this.service.user({ id: dto.id });
   }
 
-  @Post('/logup')
-  logup(@Body() dto: User) {
+  @Post('/register')
+  signUp(@Body() dto: User) {
     return this.service.createUser(dto);
   }
 }
